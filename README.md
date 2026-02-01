@@ -1,73 +1,28 @@
-# React + TypeScript + Vite
+# 업데이트 및 배포 절차
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+아래 절차는 **Colab 환경에서 백엔드 실행 후 프론트엔드에 ngrok 터널을 반영하여 서비스를 재배포**하는 전체 흐름이다.
 
-Currently, two official plugins are available:
+### 1. Colab 환경 실행
+- Google Colab에서 노트북을 열고 **모든 셀을 순차적으로 실행**한다.
+- 마지막 셀 실행 결과로 생성되는 **ngrok 터널 URL**을 확인한다.  
+  - 형식: `https://{id}.ngrok-free.app/`
+  - 이후 단계에서 `{id}` 값만 사용한다.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### 2. 프론트엔드 설정 수정
+- `App.tsx` 파일의 **17번째 줄**에서 API 엔드포인트 설정을 수정한다.
+- 1단계에서 확인한 ngrok URL의 `{id}` 값을 `CODE` 변수에 입력한다.
 
-## React Compiler
+### 3. 변경사항 커밋 및 배포
+터미널에서 아래 명령어를 순서대로 실행한다.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+git add .
+git commit -m "new commit"
+git push -u origin master
+npm run deploy
 ```
+변경된 설정을 GitHub에 반영한 뒤, 배포 스크립트를 통해 서비스를 업데이트한다.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### 4. 관련 링크
+- google colab = https://colab.research.google.com/drive/1HhpxK7LZTY2XX6ehrMbVKU6wMBrXoqp5?usp=sharing
+- github page = https://github.com/sparcscasio/sinkhole
