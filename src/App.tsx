@@ -14,7 +14,7 @@ type PredictResponse =
   | { risk: number; risk_level?: "LOW" | "MEDIUM" | "HIGH"; inputs?: any }
   | { error: string; detail?: string };
 
-const CODE = '0428-136-119-249-34';
+const CODE = 'c06ee8828a01';
 const API_BASE = `https://${CODE}.ngrok-free.app`;
 
 export default function App() {
