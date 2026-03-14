@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@turf/boolean-point-in-polygon':
+        specifier: ^7.3.4
+        version: 7.3.4
+      '@turf/helpers':
+        specifier: ^7.3.4
+        version: 7.3.4
       '@turf/turf':
         specifier: ^7.3.3
         version: 7.3.4
