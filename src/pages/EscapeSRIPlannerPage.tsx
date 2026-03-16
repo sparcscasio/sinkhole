@@ -8,7 +8,6 @@ import {
   EDGES_DEFAULT,
   getPathEdgeKeys,
   makeInitialPoints,
-
   POINT_IDS,
   randomPeople,
   randomTraffic,
@@ -20,25 +19,32 @@ import {
 } from "../sim/shared";
 import GraphView from "../components/GraphView";
 
+type EvacDot = {
+  id: string;
+  progress: number;
+  speed: number;
+  path: (PointNodeId | "EXIT")[];
+};
+
 function pointBadgeStyleByBand(band: SriBand): React.CSSProperties {
   switch (band) {
     case "low":
       return {
-        background: "rgba(16, 185, 129, 0.18)",
+        background: "rgba(167,243,208,1)",
         color: "#065F46",
-        border: "1px solid rgba(16, 185, 129, 0.35)",
+        border: "1px solid rgba(16,185,129,0.35)",
       };
     case "mid":
       return {
-        background: "rgba(245, 158, 11, 0.18)",
+        background: "rgba(253,230,138,1)",
         color: "#92400E",
-        border: "1px solid rgba(245, 158, 11, 0.35)",
+        border: "1px solid rgba(245,158,11,0.35)",
       };
     case "high":
       return {
-        background: "rgba(239, 68, 68, 0.18)",
+        background: "rgba(252,165,165,1)",
         color: "#991B1B",
-        border: "1px solid rgba(239, 68, 68, 0.35)",
+        border: "1px solid rgba(239,68,68,0.35)",
       };
   }
 }
@@ -53,6 +59,7 @@ export default function EscapeSRIPlannerPage() {
   const [escapePath, setEscapePath] = useState<(PointNodeId | "EXIT")[]>([]);
   const [evacuatedCount, setEvacuatedCount] = useState(0);
   const [lastPathCost, setLastPathCost] = useState<number | null>(null);
+  const [evacDots, setEvacDots] = useState<EvacDot[]>([]);
 
   const adj = useMemo(() => buildAdjacency(EDGES_DEFAULT), []);
 
@@ -146,8 +153,42 @@ export default function EscapeSRIPlannerPage() {
     setLastPathCost(plan?.cost ?? null);
 
     const targetPoint = points.find((p) => p.id === enteredHigh);
-    setEvacuatedCount(targetPoint?.peopleCount ?? 0);
+    const people = targetPoint?.peopleCount ?? 0;
+    setEvacuatedCount(people);
+
+    const dotCount = Math.min(12, Math.max(4, Math.floor(people / 2)));
+    setEvacDots(
+      Array.from({ length: dotCount }).map((_, i) => ({
+        id: `${enteredHigh}-${Date.now()}-${i}`,
+        progress: Math.random() * 0.05,
+        speed: 0.0025 + Math.random() * 0.0035,
+        path: plan?.path ?? [enteredHigh],
+      }))
+    );
   }, [bandMap, adj, sriMap, limitMap, points]);
+
+  useEffect(() => {
+    if (evacDots.length === 0) return;
+
+    let frameId = 0;
+
+    const tick = () => {
+      setEvacDots((prev) =>
+        prev
+          .map((dot) => ({
+            ...dot,
+            progress: Math.min(1, dot.progress + dot.speed),
+          }))
+          .filter((dot) => dot.progress < 1)
+      );
+
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frameId);
+  }, [evacDots.length]);
 
   const resetAll = () => {
     setPoints(makeInitialPoints());
@@ -157,6 +198,7 @@ export default function EscapeSRIPlannerPage() {
     setEscapePath([]);
     setEvacuatedCount(0);
     setLastPathCost(null);
+    setEvacDots([]);
     prevBandRef.current = {
       P1: "low",
       P2: "low",
@@ -177,10 +219,6 @@ export default function EscapeSRIPlannerPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {/* <Link to="/sinkhole/graph" style={styles.linkBtn}>
-            그래프 전용 페이지
-          </Link> */}
-
           <div style={styles.currentPill}>
             시뮬레이션:
             <strong style={{ marginLeft: 6, color: simulationRunning ? "#065F46" : "#374151" }}>
@@ -209,13 +247,19 @@ export default function EscapeSRIPlannerPage() {
 
       <section style={styles.graphCard}>
         <div style={styles.graphTitle}>그래프 미리보기</div>
-        <GraphView
-          edges={EDGES_DEFAULT}
-          pathEdgeKeys={pathEdgeKeys}
-          points={points}
-          sriMap={sriMap}
-          bandMap={bandMap}
-        />
+
+        <div style={styles.graphWrapper}>
+          <img src="map.png" alt="map" style={styles.mapBackground} />
+
+          <GraphView
+            edges={EDGES_DEFAULT}
+            pathEdgeKeys={pathEdgeKeys}
+            points={points}
+            sriMap={sriMap}
+            bandMap={bandMap}
+            evacDots={evacDots}
+          />
+        </div>
       </section>
 
       <div style={styles.grid}>
@@ -377,7 +421,7 @@ export default function EscapeSRIPlannerPage() {
               )}
 
               <div style={styles.modalMsgSmall}>
-                EXIT는 위험도 영향을 받지 않는 도착 목적지입니다.
+                지도 위 파란 점들은 현재 대피 중인 사람들의 이동을 의미합니다.
               </div>
             </div>
           </div>
@@ -536,17 +580,6 @@ const styles: Record<string, React.CSSProperties> = {
   title: { margin: 0, fontSize: 20, fontWeight: 700 },
   subTitle: { margin: "6px 0 0", fontSize: 13, color: "#6B7280", lineHeight: 1.5 },
 
-  linkBtn: {
-    padding: "8px 10px",
-    borderRadius: 8,
-    border: "1px solid #E5E7EB",
-    background: "#FFFFFF",
-    color: "#111827",
-    textDecoration: "none",
-    fontSize: 13,
-    fontWeight: 600,
-  },
-
   resetBtn: {
     padding: "8px 10px",
     borderRadius: 8,
@@ -576,6 +609,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     borderBottom: "1px solid #E5E7EB",
     background: "#F9FAFB",
+  },
+  graphWrapper: {
+    position: "relative",
+    width: "100%",
+    height: 520,
+    overflow: "hidden",
+  },
+  mapBackground: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    zIndex: 0,
   },
 
   grid: {

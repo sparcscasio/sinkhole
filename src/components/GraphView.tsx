@@ -6,7 +6,6 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     maxHeight: 620,
     display: "block",
-    background: "#F4F1E8",
   },
 };
 
@@ -29,15 +28,23 @@ export default function GraphView(props: {
   );
 
   return (
-    <svg viewBox="0 0 480 560" style={styles.graphSvg}>
+    <svg
+      viewBox="0 0 480 560"
+      style={{
+        ...styles.graphSvg,
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        zIndex: 1,
+      }}
+    >
       <defs>
         <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
           <path d="M 26 0 L 0 0 0 26" fill="none" stroke="#D1D5DB" strokeWidth="1" />
         </pattern>
       </defs>
-
-      <rect x="0" y="0" width="480" height="560" fill="#F4F1E8" />
-      <rect x="0" y="0" width="480" height="560" fill="url(#grid)" />
 
       {edges.map((edge, idx) => {
         const p1 = NODE_POSITIONS[edge.a];
@@ -66,14 +73,14 @@ export default function GraphView(props: {
 
         const fill =
           band === "high"
-            ? "rgba(239,68,68,0.10)"
+            ? "rgba(252,165,165,1)"
             : band === "mid"
-            ? "rgba(245,158,11,0.10)"
-            : "rgba(16,185,129,0.10)";
+            ? "rgba(253,230,138,1)" 
+            : "rgba(167,243,208,1)";
 
         return (
           <g key={id}>
-            <circle cx={pos.x} cy={pos.y} r={52} fill={fill} />
+            <circle cx={pos.x} cy={pos.y} r={52} fill={fill} stroke="#2563EB" strokeWidth={2}/>
             <text x={pos.x} y={pos.y - 6} textAnchor="middle" fontSize="22" fontWeight="700" fill="#2563EB">
               {p.label}
             </text>
