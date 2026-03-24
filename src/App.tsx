@@ -3,7 +3,7 @@ import EscapeSRIPlannerPage from "./pages/EscapeSRIPlannerPage";
 
 export default function App() {
   return (
-    <BrowserRouter basename="/sinkhole">
+    <BrowserRouter>
       <Routes>
         <Route path="/" element={<EscapeSRIPlannerPage />} />
       </Routes>
