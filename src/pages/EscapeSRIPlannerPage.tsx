@@ -4,7 +4,6 @@ import {
   clamp,
   computeSRI,
   dijkstra,
-  edgeRealWeight,
   EDGES_DEFAULT,
   getPathEdgeKeys,
   makeInitialPoints,
@@ -49,10 +48,46 @@ function pointBadgeStyleByBand(band: SriBand): React.CSSProperties {
   }
 }
 
+/**
+ * 위험 노드를 중간 경유지에서 제외하고,
+ * 1) 위험 노드 미경유
+ * 2) 더 짧은 거리
+ * 3) 더 안전한 노드
+ * 우선순위로 경로를 찾기 위한 weight 계산
+ */
+function getPriorityWeight(
+  edge: any,
+  blockedNodes: Set<PointNodeId>,
+  sriMap: Record<PointNodeId, number>,
+  limitMap: Record<PointNodeId, number>
+) {
+  const to = edge.to as PointNodeId | "EXIT";
+
+  // 중간 경유 위험 노드는 금지
+  if (to !== "EXIT" && blockedNodes.has(to)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  // 기본 거리 우선
+  const baseWeight =
+    typeof edge.weight === "number"
+      ? edge.weight
+      : typeof edge.baseWeight === "number"
+      ? edge.baseWeight
+      : 1;
+
+  // 같은 거리일 때 더 안전한 노드를 선호하도록 아주 작은 penalty 추가
+  const safetyPenalty =
+    to === "EXIT" ? 0 : (sriMap[to] / Math.max(limitMap[to], 0.0001)) * 0.001;
+
+  return baseWeight + safetyPenalty;
+}
+
 export default function EscapeSRIPlannerPage() {
   const [points, setPoints] = useState<PointData[]>(() => makeInitialPoints());
   const [simulationRunning, setSimulationRunning] = useState(false);
 
+  // 막는 모달 대신 비차단형 알림 패널
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertNode, setAlertNode] = useState<PointNodeId | null>(null);
 
@@ -118,6 +153,7 @@ export default function EscapeSRIPlannerPage() {
     });
   };
 
+  // 시뮬레이션 시작 시에만 랜덤 변동
   useEffect(() => {
     if (!simulationRunning) return;
 
@@ -134,40 +170,68 @@ export default function EscapeSRIPlannerPage() {
     return () => window.clearInterval(timer);
   }, [simulationRunning]);
 
+  // 시뮬레이션 시작 시에만 위험 감지 / 대피 실행
   useEffect(() => {
+    if (!simulationRunning) return;
+
     const prevBand = prevBandRef.current;
 
-    const enteredHigh = POINT_IDS.find((id) => prevBand[id] !== "high" && bandMap[id] === "high");
+    const enteredHigh = POINT_IDS.find(
+      (id) => prevBand[id] !== "high" && bandMap[id] === "high"
+    );
 
     prevBandRef.current = bandMap;
 
     if (!enteredHigh) return;
 
-    const plan = dijkstra(enteredHigh, "EXIT", adj, (edge) =>
-      edgeRealWeight(edge, sriMap, limitMap).realWeight
+    // 현재 위험 노드들 중, 시작 노드를 제외한 위험 노드는 경유 금지
+    const blockedNodes = new Set<PointNodeId>(
+      POINT_IDS.filter((id) => id !== enteredHigh && bandMap[id] === "high")
     );
+
+    const plan = dijkstra(enteredHigh, "EXIT", adj, (edge) =>
+      getPriorityWeight(edge, blockedNodes, sriMap, limitMap)
+    );
+
+    const finalPath = plan?.path ?? [enteredHigh, "EXIT"];
 
     setAlertNode(enteredHigh);
     setAlertOpen(true);
-    setEscapePath(plan?.path ?? [enteredHigh]);
+    setEscapePath(finalPath);
     setLastPathCost(plan?.cost ?? null);
 
     const targetPoint = points.find((p) => p.id === enteredHigh);
     const people = targetPoint?.peopleCount ?? 0;
+
     setEvacuatedCount(people);
 
-    const dotCount = Math.min(12, Math.max(4, Math.floor(people / 2)));
+    // 대피 후 해당 노드 인원 차감
+    setPoints((prev) =>
+      prev.map((p) =>
+        p.id === enteredHigh
+          ? {
+              ...p,
+              peopleCount: 0,
+            }
+          : p
+      )
+    );
+
+    const dotCount = Math.min(12, Math.max(4, Math.floor(Math.max(people, 1) / 2)));
+
     setEvacDots(
       Array.from({ length: dotCount }).map((_, i) => ({
         id: `${enteredHigh}-${Date.now()}-${i}`,
         progress: Math.random() * 0.05,
         speed: 0.0025 + Math.random() * 0.0035,
-        path: plan?.path ?? [enteredHigh],
+        path: finalPath,
       }))
     );
-  }, [bandMap, adj, sriMap, limitMap, points]);
+  }, [simulationRunning, bandMap, adj, sriMap, limitMap, points]);
 
+  // 시뮬레이션 시작 상태에서만 점 이동
   useEffect(() => {
+    if (!simulationRunning) return;
     if (evacDots.length === 0) return;
 
     let frameId = 0;
@@ -188,7 +252,7 @@ export default function EscapeSRIPlannerPage() {
     frameId = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(frameId);
-  }, [evacDots.length]);
+  }, [simulationRunning, evacDots.length]);
 
   const resetAll = () => {
     setPoints(makeInitialPoints());
@@ -213,8 +277,8 @@ export default function EscapeSRIPlannerPage() {
         <div>
           <h2 style={styles.title}>위험 노드 발생 시 EXIT 대피 시뮬레이션</h2>
           <p style={styles.subTitle}>
-            사용자 그래프 구조(1-2-3-4-EXIT)를 반영해, 위험 노드 발생 시 EXIT까지의 real
-            가중치 최단경로를 계산합니다.
+            시뮬레이션 시작 버튼을 눌러야 감지/대피/애니메이션이 실행되며,
+            위험 노드는 중간 경유지로 선택되지 않습니다.
           </p>
         </div>
 
@@ -379,51 +443,45 @@ export default function EscapeSRIPlannerPage() {
       </div>
 
       {alertOpen && alertNode && (
-        <div style={styles.modalBackdrop} role="dialog" aria-modal="true">
-          <div style={styles.modal}>
-            <div style={styles.modalTitleRow}>
-              <div style={styles.modalTitle}>⚠️ 위험 노드 발생: {alertNode}</div>
-              <button
-                type="button"
-                style={styles.modalClose}
-                onClick={() => setAlertOpen(false)}
-                aria-label="close"
-              >
-                ✕
-              </button>
+        <div style={styles.toastPanel}>
+          <div style={styles.toastHeader}>
+            <div style={styles.toastTitle}>⚠️ 위험 노드 발생: {alertNode}</div>
+            <button
+              type="button"
+              style={styles.toastClose}
+              onClick={() => setAlertOpen(false)}
+              aria-label="close"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={styles.toastBody}>
+            <div style={styles.modalMsg}>
+              <strong>{alertNode}</strong>의 실시간 SRI가 한계 SRI를 초과했습니다.
+              현재 해당 지역의 <strong>{evacuatedCount}명</strong>이 <strong>EXIT</strong>로
+              이동 중입니다.
             </div>
 
-            <div style={styles.modalBody}>
-              <div style={styles.modalMsg}>
-                <strong>{alertNode}</strong>의 실시간 SRI가 한계 SRI를 초과했습니다.
-                현재 해당 지역의 <strong>{evacuatedCount}명</strong>을 <strong>EXIT</strong>로
-                이동시켜야 합니다.
-              </div>
-
-              <div style={styles.pathBox}>
-                <div style={styles.pathLabel}>대피 경로 (EXIT까지 real 가중치 최단 경로)</div>
-                <div style={styles.pathLine}>
-                  {escapePath.map((n, i) => (
-                    <span key={`${n}-${i}`}>
-                      <span style={{ ...styles.pathNode, ...(n === "EXIT" ? styles.exitNode : {}) }}>
-                        {n}
-                      </span>
-                      {i < escapePath.length - 1 && <span style={styles.pathArrow}>→</span>}
+            <div style={styles.pathBox}>
+              <div style={styles.pathLabel}>대피 경로</div>
+              <div style={styles.pathLine}>
+                {escapePath.map((n, i) => (
+                  <span key={`${n}-${i}`}>
+                    <span style={{ ...styles.pathNode, ...(n === "EXIT" ? styles.exitNode : {}) }}>
+                      {n}
                     </span>
-                  ))}
-                </div>
-              </div>
-
-              {lastPathCost !== null && (
-                <div style={styles.modalMsgSmall}>
-                  계산된 real 최단 비용: <strong>{lastPathCost.toFixed(2)}</strong>
-                </div>
-              )}
-
-              <div style={styles.modalMsgSmall}>
-                지도 위 파란 점들은 현재 대피 중인 사람들의 이동을 의미합니다.
+                    {i < escapePath.length - 1 && <span style={styles.pathArrow}>→</span>}
+                  </span>
+                ))}
               </div>
             </div>
+
+            {lastPathCost !== null && (
+              <div style={styles.modalMsgSmall}>
+                계산 비용: <strong>{lastPathCost.toFixed(2)}</strong>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -739,25 +797,19 @@ const styles: Record<string, React.CSSProperties> = {
     transition: "transform 180ms ease",
   },
 
-  modalBackdrop: {
+  toastPanel: {
     position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.35)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-    zIndex: 50,
-  },
-  modal: {
-    width: "min(640px, 100%)",
+    right: 16,
+    bottom: 16,
+    width: "min(420px, calc(100vw - 32px))",
     background: "#FFFFFF",
-    borderRadius: 14,
     border: "1px solid #E5E7EB",
+    borderRadius: 14,
     boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
     overflow: "hidden",
+    zIndex: 50,
   },
-  modalTitleRow: {
+  toastHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -765,8 +817,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #E5E7EB",
     background: "#FFF7ED",
   },
-  modalTitle: { fontSize: 14, fontWeight: 900 },
-  modalClose: {
+  toastTitle: { fontSize: 14, fontWeight: 900 },
+  toastClose: {
     border: "1px solid #E5E7EB",
     background: "#FFFFFF",
     borderRadius: 10,
@@ -778,9 +830,10 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
   },
-  modalBody: { padding: 14, display: "grid", gap: 12 },
+
   modalMsg: { fontSize: 14, lineHeight: 1.6 },
   modalMsgSmall: { fontSize: 12, lineHeight: 1.5, color: "#6B7280" },
+  toastBody: { padding: 14, display: "grid", gap: 12 },
 
   pathBox: {
     border: "1px solid #E5E7EB",
