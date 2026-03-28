@@ -66,16 +66,16 @@ export const EDGES_DEFAULT: Edge[] = [
   { a: "P3", b: "P4", distance: 2 },
   { a: "P1", b: "P4", distance: 6 },
   { a: "P2", b: "P3", distance: 7 },
-  { a: "P3", b: "EXIT", distance: 6 },
-  { a: "P4", b: "EXIT", distance: 1 },
+  { a: "P2", b: "EXIT", distance: 1 },
+  { a: "P4", b: "EXIT", distance: 2 },
 ];
 
 export const NODE_POSITIONS: Record<NodeId, NodePosition> = {
-  P1: { x: 90, y: 80 },
+  P1: { x: 0, y: 200 },
   P2: { x: 350, y: 70 },
-  P3: { x: 105, y: 290 },
-  P4: { x: 390, y: 275 },
-  EXIT: { x: 230, y: 470 },
+  P3: { x: 230, y: 470 },
+  P4: { x: 450, y: 275 },
+  EXIT: { x: 550, y: 60 },
 };
 
 export const clamp = (v: number, min: number, max: number) =>
