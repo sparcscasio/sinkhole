@@ -47,41 +47,6 @@ function pointBadgeStyleByBand(band: SriBand): React.CSSProperties {
   }
 }
 
-/**
- * 위험 노드를 중간 경유지에서 제외하고,
- * 1) 위험 노드 미경유
- * 2) 더 짧은 거리
- * 3) 더 안전한 노드
- * 우선순위로 경로를 찾기 위한 weight 계산
- */
-function getPriorityWeight(
-  edge: any,
-  blockedNodes: Set<PointNodeId>,
-  sriMap: Record<PointNodeId, number>,
-  limitMap: Record<PointNodeId, number>
-) {
-  const to = edge.to as PointNodeId | "EXIT";
-
-  // 중간 경유 위험 노드는 금지
-  if (to !== "EXIT" && blockedNodes.has(to)) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  // 기본 거리 우선
-  const baseWeight =
-    typeof edge.weight === "number"
-      ? edge.weight
-      : typeof edge.baseWeight === "number"
-      ? edge.baseWeight
-      : 1;
-
-  // 같은 거리일 때 더 안전한 노드를 선호하도록 아주 작은 penalty 추가
-  const safetyPenalty =
-    to === "EXIT" ? 0 : (sriMap[to] / Math.max(limitMap[to], 0.0001)) * 0.001;
-
-  return baseWeight + safetyPenalty;
-}
-
 export default function EscapeSRIPlannerPage() {
   const [points, setPoints] = useState<PointData[]>(() => makeInitialPoints());
   const [simulationRunning, setSimulationRunning] = useState(false);
