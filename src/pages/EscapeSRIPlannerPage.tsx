@@ -3,12 +3,11 @@ import {
   buildAdjacency,
   clamp,
   computeSRI,
-  dijkstra,
+  dijkstraWithPriority,
   EDGES_DEFAULT,
   getPathEdgeKeys,
   makeInitialPoints,
   POINT_IDS,
-  randomPeople,
   randomTraffic,
   sriBand,
   type PointData,
@@ -143,17 +142,29 @@ export default function EscapeSRIPlannerPage() {
     P4: "low",
   });
 
+  // 이미 대피 처리된 노드는 다시 자동 대피시키지 않기 위한 latch
+  const evacuatedNodesRef = useRef<Set<PointNodeId>>(new Set());
+
   const pathEdgeKeys = useMemo(() => getPathEdgeKeys(escapePath), [escapePath]);
 
   const updatePoint = (index: number, patch: Partial<PointData>) => {
     setPoints((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], ...patch };
+      const current = next[index];
+      const updated = { ...current, ...patch };
+      next[index] = updated;
+
+      // 사용자가 직접 사람 수를 다시 넣어주면 재대피 가능 상태로 해제
+      if (typeof patch.peopleCount === "number" && patch.peopleCount > 0) {
+        evacuatedNodesRef.current.delete(updated.id);
+      }
+
       return next;
     });
   };
 
-  // 시뮬레이션 시작 시에만 랜덤 변동
+  // 시뮬레이션 시작 상태에서만 교통량 하중만 랜덤 변동
+  // (사람 수 및 다른 값들은 자동으로 바뀌지 않음)
   useEffect(() => {
     if (!simulationRunning) return;
 
@@ -162,7 +173,6 @@ export default function EscapeSRIPlannerPage() {
         prev.map((p) => ({
           ...p,
           trafficLoad: randomTraffic(),
-          peopleCount: randomPeople(p.peopleCount),
         }))
       );
     }, 5000);
@@ -176,9 +186,17 @@ export default function EscapeSRIPlannerPage() {
 
     const prevBand = prevBandRef.current;
 
-    const enteredHigh = POINT_IDS.find(
-      (id) => prevBand[id] !== "high" && bandMap[id] === "high"
-    );
+    const enteredHigh = POINT_IDS.find((id) => {
+      const point = points.find((p) => p.id === id);
+      const people = point?.peopleCount ?? 0;
+
+      return (
+        prevBand[id] !== "high" &&
+        bandMap[id] === "high" &&
+        people > 0 &&
+        !evacuatedNodesRef.current.has(id)
+      );
+    });
 
     prevBandRef.current = bandMap;
 
@@ -189,23 +207,42 @@ export default function EscapeSRIPlannerPage() {
       POINT_IDS.filter((id) => id !== enteredHigh && bandMap[id] === "high")
     );
 
-    const plan = dijkstra(enteredHigh, "EXIT", adj, (edge) =>
-      getPriorityWeight(edge, blockedNodes, sriMap, limitMap)
+    const plan = dijkstraWithPriority(
+      enteredHigh,
+      "EXIT",
+      adj,
+      blockedNodes,
+      sriMap,
+      limitMap
     );
 
-    const finalPath = plan?.path ?? [enteredHigh, "EXIT"];
-
-    setAlertNode(enteredHigh);
-    setAlertOpen(true);
-    setEscapePath(finalPath);
-    setLastPathCost(plan?.cost ?? null);
+    // 잘못된 fallback([enteredHigh, "EXIT"]) 제거
+    // dijkstra가 찾은 경로만 사용
+    const finalPath = plan?.path ?? [];
 
     const targetPoint = points.find((p) => p.id === enteredHigh);
     const people = targetPoint?.peopleCount ?? 0;
 
+    setAlertNode(enteredHigh);
+    setAlertOpen(true);
+
+    if (people <= 0 || finalPath.length === 0) {
+      setEscapePath([]);
+      setLastPathCost(null);
+      setEvacuatedCount(0);
+      setEvacDots([]);
+      return;
+    }
+
+    setEscapePath(finalPath);
+    setLastPathCost(plan?.cost ?? null);
     setEvacuatedCount(people);
 
-    // 대피 후 해당 노드 인원 차감
+    // 해당 위험 노드는 한 번 대피 처리되면 자동 재대피 방지
+    evacuatedNodesRef.current.add(enteredHigh);
+
+    // 대피 후 출발 위험 노드 인원만 차감
+    // 중간 경유 노드에는 사람 수를 더하지 않음
     setPoints((prev) =>
       prev.map((p) =>
         p.id === enteredHigh
@@ -269,6 +306,7 @@ export default function EscapeSRIPlannerPage() {
       P3: "low",
       P4: "low",
     };
+    evacuatedNodesRef.current = new Set();
   };
 
   return (
@@ -458,26 +496,37 @@ export default function EscapeSRIPlannerPage() {
 
           <div style={styles.toastBody}>
             <div style={styles.modalMsg}>
-              <strong>{alertNode}</strong>의 실시간 SRI가 한계 SRI를 초과했습니다.
-              현재 해당 지역의 <strong>{evacuatedCount}명</strong>이 <strong>EXIT</strong>로
-              이동 중입니다.
+              {escapePath.length > 0 ? (
+                <>
+                  <strong>{alertNode}</strong>의 실시간 SRI가 한계 SRI를 초과했습니다.
+                  현재 해당 지역의 <strong>{evacuatedCount}명</strong>이 <strong>EXIT</strong>로
+                  이동 중입니다.
+                </>
+              ) : (
+                <>
+                  <strong>{alertNode}</strong>의 실시간 SRI가 한계 SRI를 초과했지만,
+                  현재 조건으로는 EXIT 경로를 찾지 못했습니다.
+                </>
+              )}
             </div>
 
-            <div style={styles.pathBox}>
-              <div style={styles.pathLabel}>대피 경로</div>
-              <div style={styles.pathLine}>
-                {escapePath.map((n, i) => (
-                  <span key={`${n}-${i}`}>
-                    <span style={{ ...styles.pathNode, ...(n === "EXIT" ? styles.exitNode : {}) }}>
-                      {n}
+            {escapePath.length > 0 && (
+              <div style={styles.pathBox}>
+                <div style={styles.pathLabel}>대피 경로</div>
+                <div style={styles.pathLine}>
+                  {escapePath.map((n, i) => (
+                    <span key={`${n}-${i}`}>
+                      <span style={{ ...styles.pathNode, ...(n === "EXIT" ? styles.exitNode : {}) }}>
+                        {n}
+                      </span>
+                      {i < escapePath.length - 1 && <span style={styles.pathArrow}>→</span>}
                     </span>
-                    {i < escapePath.length - 1 && <span style={styles.pathArrow}>→</span>}
-                  </span>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
-            {lastPathCost !== null && (
+            {lastPathCost !== null && escapePath.length > 0 && (
               <div style={styles.modalMsgSmall}>
                 계산 비용: <strong>{lastPathCost.toFixed(2)}</strong>
               </div>

@@ -260,6 +260,78 @@ export function dijkstra(
   return null;
 }
 
+export function dijkstraWithPriority(
+  start: PointNodeId,
+  target: "EXIT",
+  adj: Record<"P1" | "P2" | "P3" | "P4" | "EXIT", Array<{ to: "P1" | "P2" | "P3" | "P4" | "EXIT"; edge: any }>>,
+  blockedNodes: Set<PointNodeId>,
+  sriMap: Record<PointNodeId, number>,
+  limitMap: Record<PointNodeId, number>
+) {
+  const allNodes: ("P1" | "P2" | "P3" | "P4" | "EXIT")[] = ["P1", "P2", "P3", "P4", "EXIT"];
+
+  const dist: Record<"P1" | "P2" | "P3" | "P4" | "EXIT", number> = {
+    P1: Infinity,
+    P2: Infinity,
+    P3: Infinity,
+    P4: Infinity,
+    EXIT: Infinity,
+  };
+
+  const prev: Partial<Record<"P1" | "P2" | "P3" | "P4" | "EXIT", "P1" | "P2" | "P3" | "P4" | "EXIT">> = {};
+  const visited = new Set<"P1" | "P2" | "P3" | "P4" | "EXIT">();
+
+  dist[start] = 0;
+
+  while (visited.size < allNodes.length) {
+    let u: "P1" | "P2" | "P3" | "P4" | "EXIT" | null = null;
+    let best = Infinity;
+
+    for (const n of allNodes) {
+      if (!visited.has(n) && dist[n] < best) {
+        best = dist[n];
+        u = n;
+      }
+    }
+
+    if (u === null || best === Infinity) break;
+
+    visited.add(u);
+
+    if (u === target) {
+      const path: ("P1" | "P2" | "P3" | "P4" | "EXIT")[] = [];
+      let cur: "P1" | "P2" | "P3" | "P4" | "EXIT" | undefined = u;
+
+      while (cur) {
+        path.push(cur);
+        cur = prev[cur];
+      }
+
+      path.reverse();
+      return { path, cost: dist[u] };
+    }
+
+    for (const { to, edge } of adj[u]) {
+      if (visited.has(to)) continue;
+
+      if (to !== "EXIT" && blockedNodes.has(to)) continue;
+
+      const baseWeight = edge.distance;
+      const safetyPenalty =
+        to === "EXIT" ? 0 : (sriMap[to] / Math.max(limitMap[to], 0.0001)) * 0.001;
+
+      const alt = dist[u] + baseWeight + safetyPenalty;
+
+      if (alt < dist[to]) {
+        dist[to] = alt;
+        prev[to] = u;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function randomTraffic(): TrafficLoadLevel {
   const r = Math.random();
   if (r < 0.4) return 0;
