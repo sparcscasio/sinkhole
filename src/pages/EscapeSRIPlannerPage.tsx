@@ -100,15 +100,9 @@ export default function EscapeSRIPlannerPage() {
     [points, sriMap]
   );
 
-  const prevBandRef = useRef<Record<PointNodeId, SriBand>>({
-    P1: "low",
-    P2: "low",
-    P3: "low",
-    P4: "low",
-  });
-
-  // 이미 대피 처리된 노드는 다시 자동 대피시키지 않기 위한 latch
-  const evacuatedNodesRef = useRef<Set<PointNodeId>>(new Set());
+  // 현재 "위험 처리 중"으로 본 노드 추적
+  // high 상태가 풀리거나, 사람 수가 0이 아니게 다시 바뀌면 재평가 가능
+  const handledHighNodesRef = useRef<Set<PointNodeId>>(new Set());
 
   const pathEdgeKeys = useMemo(() => getPathEdgeKeys(escapePath), [escapePath]);
 
@@ -116,64 +110,74 @@ export default function EscapeSRIPlannerPage() {
     setPoints((prev) => {
       const next = [...prev];
       const current = next[index];
-      const updated = { ...current, ...patch };
-      next[index] = updated;
-
-      // 사용자가 직접 사람 수를 다시 넣어주면 재대피 가능 상태로 해제
-      if (typeof patch.peopleCount === "number" && patch.peopleCount > 0) {
-        evacuatedNodesRef.current.delete(updated.id);
-      }
-
+      next[index] = { ...current, ...patch };
       return next;
     });
   };
 
-  // 시뮬레이션 시작 상태에서만 교통량 하중만 랜덤 변동
-  // (사람 수 및 다른 값들은 자동으로 바뀌지 않음)
+  // 시뮬레이션 시작 상태에서 교통량 + 사람 수 랜덤 변동
   useEffect(() => {
     if (!simulationRunning) return;
 
     const timer = window.setInterval(() => {
       setPoints((prev) =>
-        prev.map((p) => ({
-          ...p,
-          trafficLoad: randomTraffic(),
-        }))
+        prev.map((p) => {
+          // 사람 수를 5초마다 조금씩 변동
+          // 0이 된 노드도 다시 사람이 유입될 수 있게 함
+          const delta = Math.floor(Math.random() * 7) - 3; // -3 ~ +3
+          const nextPeople =
+            p.peopleCount === 0
+              ? clamp(Math.floor(Math.random() * 8), 0, 100) // 0 ~ 7
+              : clamp(p.peopleCount + delta, 0, 100);
+
+          return {
+            ...p,
+            trafficLoad: randomTraffic(),
+            peopleCount: nextPeople,
+          };
+        })
       );
     }, 5000);
 
     return () => window.clearInterval(timer);
   }, [simulationRunning]);
 
-  // 시뮬레이션 시작 시에만 위험 감지 / 대피 실행
+  // 시뮬레이션 시작 시 위험 감지 / 대피 실행
   useEffect(() => {
     if (!simulationRunning) return;
 
-    const prevBand = prevBandRef.current;
+    // high가 아니거나, 현재 사람이 없으면 다시 처리 가능 상태로 해제
+    POINT_IDS.forEach((id) => {
+      const point = points.find((p) => p.id === id);
+      const people = point?.peopleCount ?? 0;
+      const isHigh = bandMap[id] === "high";
 
-    const enteredHigh = POINT_IDS.find((id) => {
+      if (!isHigh || people <= 0) {
+        handledHighNodesRef.current.delete(id);
+      }
+    });
+
+    // 현재 시점에 "대피가 필요한" 노드 찾기
+    const targetNode = POINT_IDS.find((id) => {
       const point = points.find((p) => p.id === id);
       const people = point?.peopleCount ?? 0;
 
       return (
-        prevBand[id] !== "high" &&
         bandMap[id] === "high" &&
         people > 0 &&
-        !evacuatedNodesRef.current.has(id)
+        !handledHighNodesRef.current.has(id)
       );
     });
 
-    prevBandRef.current = bandMap;
-
-    if (!enteredHigh) return;
+    if (!targetNode) return;
 
     // 현재 위험 노드들 중, 시작 노드를 제외한 위험 노드는 경유 금지
     const blockedNodes = new Set<PointNodeId>(
-      POINT_IDS.filter((id) => id !== enteredHigh && bandMap[id] === "high")
+      POINT_IDS.filter((id) => id !== targetNode && bandMap[id] === "high")
     );
 
     const plan = dijkstraWithPriority(
-      enteredHigh,
+      targetNode,
       "EXIT",
       adj,
       blockedNodes,
@@ -181,14 +185,11 @@ export default function EscapeSRIPlannerPage() {
       limitMap
     );
 
-    // 잘못된 fallback([enteredHigh, "EXIT"]) 제거
-    // dijkstra가 찾은 경로만 사용
     const finalPath = plan?.path ?? [];
-
-    const targetPoint = points.find((p) => p.id === enteredHigh);
+    const targetPoint = points.find((p) => p.id === targetNode);
     const people = targetPoint?.peopleCount ?? 0;
 
-    setAlertNode(enteredHigh);
+    setAlertNode(targetNode);
     setAlertOpen(true);
 
     if (people <= 0 || finalPath.length === 0) {
@@ -203,14 +204,13 @@ export default function EscapeSRIPlannerPage() {
     setLastPathCost(plan?.cost ?? null);
     setEvacuatedCount(people);
 
-    // 해당 위험 노드는 한 번 대피 처리되면 자동 재대피 방지
-    evacuatedNodesRef.current.add(enteredHigh);
+    // 이번 high 상태 + 현재 인원에 대해서는 이미 처리했음을 표시
+    handledHighNodesRef.current.add(targetNode);
 
     // 대피 후 출발 위험 노드 인원만 차감
-    // 중간 경유 노드에는 사람 수를 더하지 않음
     setPoints((prev) =>
       prev.map((p) =>
-        p.id === enteredHigh
+        p.id === targetNode
           ? {
               ...p,
               peopleCount: 0,
@@ -223,7 +223,7 @@ export default function EscapeSRIPlannerPage() {
 
     setEvacDots(
       Array.from({ length: dotCount }).map((_, i) => ({
-        id: `${enteredHigh}-${Date.now()}-${i}`,
+        id: `${targetNode}-${Date.now()}-${i}`,
         progress: Math.random() * 0.05,
         speed: 0.0025 + Math.random() * 0.0035,
         path: finalPath,
@@ -265,13 +265,7 @@ export default function EscapeSRIPlannerPage() {
     setEvacuatedCount(0);
     setLastPathCost(null);
     setEvacDots([]);
-    prevBandRef.current = {
-      P1: "low",
-      P2: "low",
-      P3: "low",
-      P4: "low",
-    };
-    evacuatedNodesRef.current = new Set();
+    handledHighNodesRef.current = new Set();
   };
 
   return (
