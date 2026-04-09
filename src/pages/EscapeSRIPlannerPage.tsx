@@ -137,7 +137,7 @@ export default function EscapeSRIPlannerPage() {
           };
         })
       );
-    }, 5000);
+    }, 3000);
 
     return () => window.clearInterval(timer);
   }, [simulationRunning]);
